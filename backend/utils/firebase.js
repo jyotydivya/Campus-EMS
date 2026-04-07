@@ -1,22 +1,33 @@
 const admin = require('firebase-admin');
 const path = require('path');
 const fs = require('fs');
-const serviceAccountPath = path.join(__dirname, '..', 'firebase-service-account.json');
 
 let firebaseInitialized = false;
 
 try {
-  if (fs.existsSync(serviceAccountPath)) {
-    const serviceAccount = require(serviceAccountPath);
+  let serviceAccount = null;
 
+  // 1. First, check if the service account is provided via an Environment Variable (Best for Production/Deployment)
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+    serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+  } 
+  // 2. Fallback to reading from the local file (Best for Local Development)
+  else {
+    const serviceAccountPath = path.join(__dirname, '..', 'firebase-service-account.json');
+    console.log('Firebase service account path:', serviceAccountPath);
+    if (fs.existsSync(serviceAccountPath)) {
+      serviceAccount = require(serviceAccountPath);
+    }
+  }
+
+  if (serviceAccount) {
     admin.initializeApp({
       credential: admin.credential.cert(serviceAccount),
     });
-
     firebaseInitialized = true;
     console.log('Firebase initialized successfully');
   } else {
-    console.log('Firebase service account file not found. Notifications disabled.');
+    console.log('Firebase credentials not found (checked ENV and local file). Notifications disabled.');
   }
 } catch (error) {
   console.error('Firebase initialization error:', error.message);
