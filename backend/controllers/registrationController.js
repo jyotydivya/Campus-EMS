@@ -146,7 +146,8 @@ exports.cancelRegistration = async (req, res) => {
     await reg.save();
 
     // Invalidate the ticket
-    await Ticket.findOneAndUpdate({ registration: reg._id }, { isValid: false });
+    // await Ticket.findOneAndUpdate({ registration: reg._id }, { isValid: false });
+    await Ticket.updateMany({ registration: reg._id }, { $set: { isValid: false } });
 
     // Decrement participant count
     await Event.findByIdAndUpdate(reg.event, { $inc: { currentParticipants: -1 } });
