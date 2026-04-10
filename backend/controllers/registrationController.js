@@ -2,7 +2,8 @@ const QRCode = require('qrcode');
 const { v4: uuidv4 } = require('uuid');
 const { Registration, Ticket } = require('../models/Registration');
 const Event = require('../models/Event');
-const { sendNotificationToTopic, sendFirebaseEmail } = require('../utils/firebase');
+const { sendNotificationToTopic } = require('../utils/firebase');
+const { sendEmail, templates } = require('../utils/mailer');
 
 // POST /api/registrations — student registers for event
 exports.registerForEvent = async (req, res) => {
@@ -56,17 +57,22 @@ exports.registerForEvent = async (req, res) => {
     // Subscribe to event push topic
     // (FCM topic subscription handled client-side via Firebase SDK)
 
-    // Send confirmation email via Firebase Trigger Email extension
-    await sendFirebaseEmail(
-      req.user.email,
-      `Registration Confirmed: ${event.title}`,
-      `<h2>You're registered!</h2>
-        <p>Hi ${req.user.name},</p>
-        <p>Your registration for <strong>${event.title}</strong> is confirmed.</p>
-        <p><strong>Date:</strong> ${new Date(event.startDate).toLocaleString()}</p>
-        <p><strong>Venue:</strong> ${event.venue}</p>
-        <p>Your QR ticket is attached. Please show it at entry.</p>`
-    );
+    // ─── Send confirmation email via Nodemailer (non-blocking) ───────────────
+    const emailHtml = templates.bookingConfirmationHtml({
+      studentName: req.user.name || 'Student',
+      eventTitle: event.title,
+      startDate: new Date(event.startDate).toLocaleString('en-IN', { dateStyle: 'full', timeStyle: 'short' }),
+      venue: event.venue,
+      isPaid: event.isPaid,
+      price: event.price,
+      ticketId,
+    });
+
+    sendEmail({
+      to: req.user.email,
+      subject: `🎟️ Registration Confirmed: ${event.title}`,
+      html: emailHtml
+    }); // intentionally not awaited — response is sent immediately
 
     res.status(201).json({ registration, ticket, message: 'Registered successfully! Check your email for the QR ticket.' });
   } catch (err) {
@@ -150,7 +156,27 @@ exports.cancelRegistration = async (req, res) => {
     await Ticket.updateMany({ registration: reg._id }, { $set: { isValid: false } });
 
     // Decrement participant count
-    await Event.findByIdAndUpdate(reg.event, { $inc: { currentParticipants: -1 } });
+    const event = await Event.findByIdAndUpdate(
+      reg.event,
+      { $inc: { currentParticipants: -1 } },
+      { new: false } // returns the document BEFORE update
+    );
+
+    // ─── Send cancellation email via Nodemailer (non-blocking) ──────────────
+    if (event) {
+      const emailHtml = templates.cancellationHtml({
+        studentName: req.user.name || 'Student',
+        eventTitle: event.title,
+        startDate: new Date(event.startDate).toLocaleString('en-IN', { dateStyle: 'full', timeStyle: 'short' }),
+        venue: event.venue,
+      });
+
+      sendEmail({
+        to: req.user.email,
+        subject: `❌ Registration Cancelled: ${event.title}`,
+        html: emailHtml
+      }); // intentionally not awaited
+    }
 
     res.json({ message: 'Registration cancelled.' });
   } catch (err) {
